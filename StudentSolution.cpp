@@ -6,7 +6,7 @@
 
 const double LOW_DONOR_THRESHOLD = 0.45;
 const double DROUGHT_THRESHOLD = 0.2;
-const double MINIMUM_FLOW = 0.25;
+const double MINIMUM_FLOW = 0;
 
 bool isExactlyFilled(Region* r) {
     return std::abs(r->waterLevel - (r->waterNeed + 1.0)) < 0.1;
@@ -17,7 +17,7 @@ bool isStable(Region* r) {
 }
 
 double availableSurplus(Region* donor) {
-    return std::max(0.0, donor->waterLevel - donor->waterNeed * LOW_DONOR_THRESHOLD);
+    return std::max(0.0, donor->waterLevel - donor->waterCapacity * DROUGHT_THRESHOLD);
 }
 
 double clamp(double value, double low, double high) {
@@ -25,24 +25,16 @@ double clamp(double value, double low, double high) {
 }
 
 void solveProblems(AcequiaManager& manager) {
-    std::map<std::string, bool> droughtExitLogged;
-    std::map<std::string, bool> droughtEntered;
+	
     auto canals = manager.getCanals();
     auto regions = manager.getRegions();
     std::vector<Region*> done;
 
     while (!manager.isSolved && manager.hour != manager.SimulationMax) {
-        // Apply soft buffer to avoid early drought
-        for (Region* r : regions) {
-            if (r->isInDrought && r->waterLevel < r->waterCapacity * DROUGHT_THRESHOLD + 5) {
-                r->updateWaterLevel(5.0); // push slightly above threshold
-            }
-        }
         for (auto& canal : canals) canal->toggleOpen(false);
 
         // Emergency response
-        for (Region* r : regions) {
-        }
+        
 
         for (Region* r : regions) {
             if (!r->isInDrought && !r->isFlooded) continue;
@@ -55,16 +47,18 @@ void solveProblems(AcequiaManager& manager) {
                 if (surplus <= 0) continue;
 
                 for (auto& canal : canals) {
-                    if (canal->sourceRegion == other && canal->destinationRegion == r) {
+                    if (canal->sourceRegion == other && canal->destinationRegion == r && r->isInDrought) {
                         double flow = clamp(delta / 3.6, MINIMUM_FLOW, surplus);
                         canal->setFlowRate(flow);
                         canal->toggleOpen(true);
+						r->isInDrought = false;
                     }
                     if (canal->sourceRegion == r && canal->destinationRegion == other && r->isFlooded) {
                         double excess = r->waterLevel - (r->waterNeed + 1.0);
                         double flow = clamp(excess / 3.6, MINIMUM_FLOW, excess);
                         canal->setFlowRate(flow);
                         canal->toggleOpen(true);
+						r->isFlooded = false;
                     }
                 }
             }
@@ -119,7 +113,7 @@ void solveProblems(AcequiaManager& manager) {
         }
 
         // Final 5-hour override
-        if (manager.SimulationMax - manager.hour <= 5) {
+        if (manager.SimulationMax - manager.hour <= 2) {
             std::vector<Region*> remaining;
             for (Region* r : regions) {
                 if (!isExactlyFilled(r)) remaining.push_back(r);
@@ -154,7 +148,6 @@ void solveProblems(AcequiaManager& manager) {
                 }
             }
         }
-
         manager.nexthour();
     }
 }
